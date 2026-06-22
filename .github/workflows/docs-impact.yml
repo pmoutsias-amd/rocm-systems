@@ -1,0 +1,55 @@
+# ROCm docs-impact bot — advisory PR comment (POC, scoped to RCCL).
+#
+# Safety properties:
+#   - Advisory only: posts/edits a single sticky comment. Never edits docs,
+#     never reports a failing/required status, so it cannot block a merge.
+#   - pull_request (NOT pull_request_target): PR content is untrusted; worst-case
+#     prompt injection yields a weird comment, never a privileged action.
+#   - Kill switch: add the skip-docs-check label to silence the bot.
+#   - Scoped: only runs on PRs that touch projects/rccl/**.
+
+name: docs-impact
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "projects/rccl/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: docs-impact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  docs-impact:
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-docs-check') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bot code
+        uses: actions/checkout@v4
+        with:
+          repository: pmoutsias-amd/ROCm-Changelog-Checker
+          ref: main
+          token: ${{ secrets.BOT_REPO_PAT }}
+          path: bot
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r bot/requirements.txt
+
+      - name: Run docs-impact check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python bot/docs_impact.py check \
+            "${{ github.repository }}#${{ github.event.pull_request.number }}" \
+            --post --quiet
